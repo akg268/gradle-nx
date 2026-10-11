@@ -21,6 +21,136 @@ library affects `domain`, `payments`, and `orders`.
 You do not need a system Gradle installation. The Gradle wrapper is included.
 The Nx wrapper downloads the Nx version pinned in `nx.json` on its first run.
 
+## How Nx is integrated with Gradle
+
+Nx does not replace Gradle. Gradle still compiles Java, resolves dependencies,
+runs JUnit, and packages the modules. Nx reads Gradle's project and task graph,
+then decides which Gradle tasks need to run.
+
+### 1. Initialize Nx in an existing Gradle repository
+
+From the root of a Gradle repository, run:
+
+```bash
+npx nx@latest init --plugins=@nx/gradle
+```
+
+The initializer creates the Nx wrapper (`nx`, `nx.bat`, and `.nx/nxw.js`),
+adds `nx.json`, installs `@nx/gradle`, and adds the companion Gradle plugin.
+This example pins the generated Nx installation to version `23.3.0` in
+`nx.json`.
+
+### 2. Expose the Gradle project graph to Nx
+
+The root [`build.gradle.kts`](build.gradle.kts) applies the Nx project-graph
+plugin:
+
+```kotlin
+plugins {
+    id("dev.nx.gradle.project-graph") version("0.1.25")
+    base
+}
+
+allprojects {
+    apply(plugin = "dev.nx.gradle.project-graph")
+}
+```
+
+The companion plugin adds Gradle reporting tasks such as `nxProjectGraph` and
+`nxProjectReport`. `@nx/gradle` invokes those tasks and converts their output
+into the Nx project graph.
+
+The existing Gradle modules remain declared normally in
+[`settings.gradle.kts`](settings.gradle.kts):
+
+```kotlin
+include(
+    ":libs:domain",
+    ":services:payments",
+    ":services:orders",
+)
+```
+
+### 3. Let Gradle dependencies create Nx graph edges
+
+The payment and order modules contain a normal Gradle project dependency:
+
+```kotlin
+dependencies {
+    implementation(project(":libs:domain"))
+}
+```
+
+Nx reads that relationship from Gradle. There is no second dependency map to
+maintain in `nx.json`.
+
+```text
+:libs:domain
+    ├──> :services:payments
+    └──> :services:orders
+```
+
+That dependency is why a `domain` change affects both services, while a
+`payments` change does not affect `orders`.
+
+### 4. Map Nx targets to Gradle tasks
+
+[`nx.json`](nx.json) enables the Gradle integration and names the inferred
+targets:
+
+```json
+{
+  "plugins": [
+    {
+      "plugin": "@nx/gradle",
+      "options": {
+        "testTargetName": "test",
+        "classesTargetName": "classes",
+        "buildTargetName": "build"
+      }
+    }
+  ]
+}
+```
+
+The resulting command mapping looks like this:
+
+| Nx command | Gradle task executed |
+| --- | --- |
+| `./nx test ':services:payments'` | `./gradlew :services:payments:test` |
+| `./nx build ':services:orders'` | `./gradlew :services:orders:build` |
+| `./nx classes ':libs:domain'` | `./gradlew :libs:domain:classes` |
+
+Nx schedules the selected target and its dependencies. Gradle remains the
+executor and continues to honor its own task graph and build configuration.
+
+### 5. Add affected selection above the Gradle graph
+
+For `nx affected`, Nx combines two pieces of information:
+
+1. Git identifies files changed between the base and head revisions.
+2. The Gradle project graph identifies the owning modules and their downstream
+   consumers.
+
+Nx then invokes only the selected Gradle test tasks. This selection happens at
+the module/task level, not at the individual JUnit-method level.
+
+### Integration flow
+
+```text
+build.gradle.kts and settings.gradle.kts
+                 ↓
+dev.nx.gradle.project-graph
+                 ↓
+          Nx project graph
+                 +
+              Git diff
+                 ↓
+       Affected Nx test targets
+                 ↓
+       Corresponding Gradle tasks
+```
+
 ## Explore the workspace
 
 List the projects Nx inferred from Gradle:
