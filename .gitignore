@@ -1,0 +1,11 @@
+.gradle/
+**/build/
+node_modules/
+
+.nx/installation
+.nx/cache
+.nx/workspace-data
+.nx/self-healing
+.nx/migrate-runs
+.claude/worktrees
+.claude/settings.local.json
